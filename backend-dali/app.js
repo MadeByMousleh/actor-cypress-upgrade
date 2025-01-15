@@ -6,10 +6,10 @@ import dotenv from 'dotenv';
 import EventSource from 'eventsource';
 import LoginTelegramReply from './telegrams/v1/Login/reply.js';
 import ActorBootStateRequestReply from './telegrams/v1/ActorBootStateRequest-0017/reply.js';
-import { ActorDFUProcess } from '../actor-upgrade/bleFacade.js';
 import EventEmitter from 'events';
+import CypressOTAHandler from '../actor-upgrade/CypressOTAHandler.js';
 
-const PAYLOAD_PATH = './firmwares/P47/0218/353AP20218.cyacd';
+const PAYLOAD_PATH = './firmwares/P47/0227/353AP20227.cyacd';
 
 dotenv.config();
 
@@ -133,30 +133,45 @@ const onprogress = (progress) => {
 
 async function startDFUProcess(mac) {
 
+    console.log("Trying to connect")
+
     const connected = await connectToDevice(mac);
+
     if (!connected) return;
+
     console.log("Connected")
 
+
+    console.log("Trying to login");
+
     const isLoggedIn = await sendLoginTelegram(mac);
+
+    
     if (!isLoggedIn) return;
+    
+    console.log("Logged in to the detector");
+
+    console.log("Trying to jump to actor boot");
+
 
     const isJumpedToBoot = await sendJumpToBootTelegram(mac);
+
     if (!isJumpedToBoot) return;
+
+    console.log("Jumped to actor boot");
+
+    console.log("Checking the actor boot state");
 
     const state = await getActorBootState(mac);
 
-    console.log(state)
+    console.log("Result of actor boot state", state === '02' ? 'BOOT': "APPLICATION");
 
     if (state !== '01') return;
 
-    const payload = await readFile(PAYLOAD_PATH, 'utf8');
 
-    ActorDFUProcess(
-        mac, 
-        sendDataChunk, (val) => responseEvent.on("response", data => val(data)),
-        PAYLOAD_PATH,
-        onprogress
-    )
+    const otaHandler = new CypressOTAHandler(mac, sendDataChunk, (cb) => responseEvent.on('response', cb), PAYLOAD_PATH, null, 130);
+
+    otaHandler.startOTA();
 }
 
 async function sendDataChunk(chunk, nodeMac) {
