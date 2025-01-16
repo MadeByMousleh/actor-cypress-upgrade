@@ -131,6 +131,10 @@ const onprogress = (progress) => {
     console.log(progress);
 }
 
+function delay(ms = 2000) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 async function startDFUProcess(mac) {
 
     console.log("Trying to connect")
@@ -146,9 +150,9 @@ async function startDFUProcess(mac) {
 
     const isLoggedIn = await sendLoginTelegram(mac);
 
-    
+
     if (!isLoggedIn) return;
-    
+
     console.log("Logged in to the detector");
 
     console.log("Trying to jump to actor boot");
@@ -162,19 +166,41 @@ async function startDFUProcess(mac) {
 
     console.log("Checking the actor boot state");
 
+    await delay();
+
     const state = await getActorBootState(mac);
 
-    console.log("Result of actor boot state", state === '02' ? 'BOOT': "APPLICATION");
+    console.log("Result of actor boot state", state === '01' ? 'BOOT' : "APPLICATION");
+
+    console.log(state)
 
     if (state !== '01') return;
 
 
-    const otaHandler = new CypressOTAHandler(mac, sendDataChunk, (cb) => responseEvent.on('response', cb), PAYLOAD_PATH, null, 130);
+    await delay();
+
+    const otaHandler = new CypressOTAHandler(mac, sendDataChunk, (cb) => responseEvent.on('response', data => cb(data)), PAYLOAD_PATH, null, 130);
+
+    console.log("Starting OTA")
 
     otaHandler.startOTA();
+
+    // otaHandler.onWrite(data => {
+    //     console.log(data, "From onWrite")
+    // })
+
+
+    // otaHandler.onResponse(data => {
+    //     console.log(data, "From Response")
+    // })
+
+    otaHandler.onProgress(data => {
+        console.log(data)
+    })
 }
 
 async function sendDataChunk(chunk, nodeMac) {
+
     try {
         const url = `http://192.168.40.1/gatt/nodes/${nodeMac}/handle/19/value/${chunk}?noresponse=1`;
         const response = await fetch(url, {
@@ -204,13 +230,13 @@ dfuControllerEvent.onmessage = (msg) => {
 };
 
 
-app.post('/upgrade-start', (req, res) => {
+app.post('/upgrade-start', async (req, res) => {
     const { mac } = req.body;
-    startDFUProcess(mac).catch(console.error);
+    await startDFUProcess(mac).catch(console.error);
     res.status(200).send('Upgrade process started');
 
 });
 
-app.listen(9999, () => {
+app.listen(9998, () => {
     console.log('Events service started at http://localhost:9999');
 });

@@ -8,6 +8,7 @@ import VerifyRowPacket from '../telegrams/v1/cypressPackets/VerifyRow/index.js'
 import WriteRowDataPacket from '../telegrams/v1/cypressPackets/WriteDataRowPacket/index.js'
 import FlashRow from './FlashRow.js'
 
+import { readFile } from 'fs/promises';  // Async version of fs module
 class PayloadProcessor {
 
     #header = null
@@ -25,15 +26,15 @@ class PayloadProcessor {
 
         this.#payload = payload;
 
-        this.#header = this.getHeader();
+        // this.#header = this.getHeader();
 
-        this.#siliconId = this.getSiliconId();
+        // this.#siliconId = this.getSiliconId();
 
-        this.#siliconRev = this.getSiliconRev();
+        // this.#siliconRev = this.getSiliconRev();
 
-        this.#checkSumType = this.getChecksumType();
+        // this.#checkSumType = this.getChecksumType();
 
-        this.#flashDataLines = this.getFlashDataLines();
+        // this.#flashDataLines = this.getFlashDataLines();
 
         this.securityKey = securityKey;
         this.chunkLength = chunkLength;
@@ -63,31 +64,31 @@ class PayloadProcessor {
         return linesArr;
     }
 
-   async splitFirmwareIntoLines() {
+    async splitFirmwareIntoLines() {
 
-    
-        this.#file = await readFile(this.#payload, 'utf8').trim();
+
+        this.#file = await readFile(this.#payload, 'utf8')
+        this.#file = this.#file.trim();
 
         let packetsArray = [
-            new EnterBootLoaderPacket().create(), 
+            new EnterBootLoaderPacket().create(),
             new GetFlashSizePacket().create()];
         let lines = this.#file.split(/\r?\n/);
-        
+
         for (var i = 1; i < lines.length; i++) {
 
             const chunk = lines[i].substring(11, lines[i].length - 2).toUpperCase();
 
-            const chunks =  chunk.match(new RegExp(`.{1,${this.chunkLength}}`, 'g'));
+            const chunks = chunk.match(new RegExp(`.{1,${this.chunkLength}}`, 'g'));
 
             chunks.forEach((dataChunk, index) => {
 
-                if(dataChunk.length === this.chunkLength)
-                {
+                if (dataChunk.length === this.chunkLength) {
                     packetsArray.push(new SendDataPacket(dataChunk).create());
 
                 }
                 else {
-                    
+
                     const arrayId = lines[i].substring(1, 3).toUpperCase();
                     const rowNumber = lines[i].substring(3, 7).toUpperCase();
 
@@ -99,7 +100,7 @@ class PayloadProcessor {
 
         }
 
-        packetsArray.push( new VerifyChecksumPacket().create())
+        packetsArray.push(new VerifyChecksumPacket().create())
         packetsArray.push(new ExitBootLoaderPacket().create())
 
         // this.#writeArrayToFile(this.#filePath, packetsArray);

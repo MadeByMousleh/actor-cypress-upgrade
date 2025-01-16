@@ -6,25 +6,17 @@ import DFUController from './DFUManager/DFUController.js'
 export default class CypressOTAHandler {
 
     mac = ""
-    onWrite = () => { }
-    onRead = () => { }
-    onResponse = () => { }
     payloadPath = ""
-    onProgress = 0
     securityKey = null
     chunkLength = 130
-    payload = null;
-    otaController = new DFUController();
+    otaController;
 
-  
+
 
     constructor(mac, onWrite, onRead, payloadPath, securityKey = null, chunkLength = 130) {
+        console.log('*********************************')
 
         this.mac = mac;
-
-        this.onWrite = onWrite
-
-        this.onRead = onRead;
 
         this.payloadPath = payloadPath;
 
@@ -32,12 +24,17 @@ export default class CypressOTAHandler {
 
         this.chunkLength = chunkLength;
 
-        this.otaController = new DFUController(this.payloadPath, this.onWrite, this.onRead, this.mac, this.onProgress, this.securityKey, this.chunkLength);
+        this.otaController = new DFUController(this.payloadPath, onWrite, this.mac, this.onProgress, this.securityKey, this.chunkLength);
+
+        onRead(data => {
+            this.otaController.onResponse(data);
+        })
 
     }
 
 
     startOTA() {
+        console.log("Payload", this.payloadPath)
 
         this.otaController.startDFU();
     }
@@ -51,7 +48,7 @@ export default class CypressOTAHandler {
     }
 
     onWrite(cb) {
-        this.otaController.eventEmitter.on("progress", cb)
+        this.otaController.eventEmitter.on("write", cb)
     }
 
 }

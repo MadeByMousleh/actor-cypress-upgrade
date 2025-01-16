@@ -48,9 +48,8 @@ export default class DFUController {
 
     eventEmitter = new EventEmitter();
 
-    onRead;
 
-    constructor(payload, writeMethod, onRead, bleDevice, progress, securityKey, chunkLength) {
+    constructor(payload, writeMethod, bleDevice, progress, securityKey, chunkLength) {
 
 
         this.#payload = payload;
@@ -67,17 +66,10 @@ export default class DFUController {
 
         this.processor = new PayloadProcessor(this.#payload, this.securityKey, this.chunkLength);
 
-        this.rows = this.processor.splitFirmwareIntoLines();
-
         this.bleDevice = bleDevice;
-
-        this.amountOfRows = this.rows.length;
 
         this.responseHandler = new ResponseHandler();
 
-        this.onRead = onRead;
-
-        
 
     }
 
@@ -87,13 +79,13 @@ export default class DFUController {
     getPacketToSend() {
 
         if (this.rowIndex <= this.rows.length + 1) {
-          
+
 
             this.eventEmitter.emit('progress', {
                 mac: this.bleDevice,
                 rowsProgrammed: this.amountOfRows - this.rows.length,
-                percentage: Math.round(( (this.amountOfRows - this.rows.length) / this.amountOfRows ) * 100),
-                
+                percentage: Math.round(((this.amountOfRows - this.rows.length) / this.amountOfRows) * 100),
+
             })
 
             return this.rows.shift();
@@ -103,36 +95,41 @@ export default class DFUController {
 
 
 
-    startDFU() {
+    async startDFU() {
+
         console.log("## STARTING DFU ##");
+
+        this.rows = await this.processor.splitFirmwareIntoLines();
+
+        this.amountOfRows = this.rows.length;
 
         let packet = this.getPacketToSend();
 
-        
-        this.#writeMethod(this.getPacketToSend(), this.bleDevice)
 
-        this.eventEmitter.emit("write", {data: packet, mac: this.bleDevice});
+        this.#writeMethod(packet, this.bleDevice)
+
+        this.eventEmitter.emit("write", { data: packet, mac: this.bleDevice });
     }
 
 
-    onResponse() {
-
-        this.onRead((response) => {
+    onResponse(response) {
 
         let answer = this.responseHandler.handleResponse(response);
 
-        this.eventEmitter.emit("response", {data: packet, mac: this.bleDevice});
 
 
         if (answer.isAccepted) {
 
             const packet = this.getPacketToSend();
 
+            this.eventEmitter.emit("response", { data: response, mac: this.bleDevice, answer: answer });
+
+
             if (packet) {
 
                 const upperCasePacket = packet;
 
-                this.eventEmitter.emit("write", {data: upperCasePacket, mac: this.bleDevice});
+                this.eventEmitter.emit("write", { data: upperCasePacket, mac: this.bleDevice });
 
                 this.#writeMethod(upperCasePacket, this.bleDevice);
 
@@ -142,12 +139,11 @@ export default class DFUController {
 
             }
         }
-    })  
 
     }
 
 
 
-    
+
 
 }
