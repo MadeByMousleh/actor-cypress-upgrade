@@ -36,9 +36,9 @@ let DFUControllers = {};
 
 
 
-async function connectToDevice(nodeMac) {
+async function connectToDevice(mac) {
     try {
-        const response = await fetch(`http://192.168.40.1/gap/nodes/${nodeMac}/connection`, {
+        const response = await fetch(`http://192.168.40.1/gap/nodes/${mac}/connection`, {
             method: 'POST',
             headers: {
                 'Accept': '*/*',
@@ -58,9 +58,9 @@ async function connectToDevice(nodeMac) {
     }
 }
 
-async function sendLoginTelegram(nodeMac) {
+async function sendLoginTelegram(mac) {
     try {
-        const response = await fetch(`http://192.168.40.1/gatt/nodes/${nodeMac}/handle/19/value/0110000900FB951D01?noresponse=1`, {
+        const response = await fetch(`http://192.168.40.1/gatt/nodes/${mac}/handle/19/value/0110000900FB951D01?noresponse=1`, {
             method: 'GET',
             headers: {
                 'Accept': '*/*',
@@ -72,7 +72,7 @@ async function sendLoginTelegram(nodeMac) {
             return new Promise((resolve) => {
                 evReply.onmessage = (msg) => {
                     const { id, value } = JSON.parse(msg.data);
-                    if (id.toUpperCase() === nodeMac.toUpperCase()) {
+                    if (id.toUpperCase() === mac.toUpperCase()) {
                         const loginReplyPacket = new LoginTelegramReply();
                         return resolve(loginReplyPacket.isAck(value));
                     }
@@ -86,22 +86,10 @@ async function sendLoginTelegram(nodeMac) {
     }
 }
 
-async function sendJumpToBootTelegram(nodeMac, application = "02") {
-    try {
-        const response = await fetch(`http://192.168.40.1/gatt/nodes/${nodeMac}/handle/19/value/0101000800D9CB${application}?noresponse=1`, {
-            method: 'GET',
-        });
 
-        return response.status === 200;
-    } catch (error) {
-        console.error('Error in sendJumpToBootTelegram', error);
-        return false;
-    }
-}
-
-async function getActorBootState(nodeMac) {
+async function getActorBootState(mac) {
     try {
-        const response = await fetch(`http://192.168.40.1/gatt/nodes/${nodeMac}/handle/19/value/0117000700D9E7?noresponse=1`, {
+        const response = await fetch(`http://192.168.40.1/gatt/nodes/${mac}/handle/19/value/0117000700D9E7?noresponse=1`, {
             method: 'GET',
         });
 
@@ -109,7 +97,7 @@ async function getActorBootState(nodeMac) {
             return new Promise((resolve) => {
                 evReply.onmessage = (msg) => {
                     const { id, value } = JSON.parse(msg.data);
-                    if (value.slice(2, 6) === "1800" && id.toUpperCase() === nodeMac.toUpperCase()) {
+                    if (value.slice(2, 6) === "1800" && id.toUpperCase() === mac.toUpperCase()) {
                         const reply = new ActorBootStateRequestReply(value);
                         resolve(reply.data.value.join(""));
                     }
@@ -135,8 +123,93 @@ function delay(ms = 2000) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function startDFUProcess(mac) {
 
+evReply.onmessage = (msg) => {
+
+    let { id, value, handle } = JSON.parse(msg.data);
+
+    if (handle === 14) {
+
+        let bufferData = new Buffer.from(value, 'hex');
+
+        return DFUControllers[id].onResponse(bufferData);
+    }
+
+    else {
+
+        dataEmitter.emit(id, value);
+
+    }
+
+
+}
+
+
+async function sendJumpToBootTelegram(mac, application = "01") {
+    try {
+        const response = await fetch(`http://192.168.40.1/gatt/nodes/${mac}/handle/19/value/0101000800D9CB${application}?noresponse=1`);
+
+        console.log(response)
+
+        if (response.status === 200) {
+            return true;
+        }
+
+        // Return `false` for unexpected status codes
+        console.error(`Unexpected status code: ${response.status}`);
+        return false;
+    } catch (error) {
+        console.error(`Error sending JumpToBootTelegram: ${error.message}`);
+        return false;
+    }
+}
+
+
+async function openNotification(mac) {
+
+    const result = await fetch(`http://192.168.40.1/gatt/nodes/${mac}/handle/15/value/0100`)
+
+    const resultData = result;
+
+    if (resultData.status === 200) {
+        return true;
+    }
+
+    console.log("Failed on opening notification")
+    return false;
+
+}
+
+
+const checkIfHandleIsThere = async (mac) => {
+
+    if (!mac || typeof mac !== "string") {
+        console.error("Invalid MAC address provided");
+        return false;
+    }
+
+    try {
+        const response = await fetch(`http://192.168.40.1/gatt/nodes/${mac}/characteristics/00060001-f8ce-11e4-abf4-0002a5d5c51b/descriptors`);
+
+        console.log(response.status)
+
+        if (response.status === 200) {
+
+            return !Array.isArray(response.json)
+
+        } else {
+            console.error(`Unexpected status code: ${response.status}`);
+            return false;
+        }
+    } catch (error) {
+        console.error(`Error fetching data for MAC address ${mac}:`, error.message);
+        return false;
+    }
+};
+
+
+
+const makeActorReadyForProgramming = async (mac) => {
     console.log("Trying to connect")
 
     const connected = await connectToDevice(mac);
@@ -172,18 +245,169 @@ async function startDFUProcess(mac) {
 
     console.log("Result of actor boot state", state === '01' ? 'BOOT' : "APPLICATION");
 
-    console.log(state)
+    return state === '01' ? true : false;
+}
 
-    if (state !== '01') return;
+
+const makeSensorReadyForProgramming = async (mac) => {
+
+    console.log("Starting process to make sensor ready for programming...\n");
+
+    const connectionResult = await connectToDevice(mac);
+    if (!connectionResult) {
+        console.error(`Failed to connect to device with MAC address ${mac}. Status: ${connectionResult.status}`);
+        return;
+    }
+
+    console.log("Connected to device...\n");
+
+    const isInBoot = await checkIfHandleIsThere(mac);
+
+    if (isInBoot) {
+        console.log("Device is already in boot mode...\n");
+        await handleAlreadyInBoot(mac);
+        return;
+    }
+
+    let isLoggedIn = await sendLoginTelegram(mac)
+
+    if (isLoggedIn) {
+        console.log("Logged into device...\n");
+        await attemptJumpToBoot(mac);
+        return;
+    }
+
+    console.log("Login failed, attempting to handle already in boot mode...\n");
+
+};
 
 
-    await delay();
 
-    const otaHandler = new CypressOTAHandler(mac, sendDataChunk, (cb) => responseEvent.on('response', data => cb(data)), PAYLOAD_PATH, null, 130);
+
+async function attemptJumpToBoot(mac, retries = 3) {
+
+    for (let attempt = 1; attempt <= retries; attempt++) {
+
+        console.log(`Attempting to jump to boot mode. Retry ${attempt} of ${retries}...`);
+
+        const jumpedToBoot = await sendJumpToBootTelegram(mac, '01');
+
+        if (jumpedToBoot) {
+
+            console.log("Successfully jumped to boot mode... \n");
+
+            console.log("Disconnected automatically... \n");
+
+            // Wait for 5 seconds before reconnecting
+            console.log("Waiting for 5 seconds....")
+
+            await delay(5000)
+
+            console.log("Reconnecting to device...\n");
+
+            const reconnectResult = await connectToDevice(mac);
+
+            if (reconnectResult.status !== 200) {
+
+                console.error(`Failed to reconnect to device with MAC address ${mac}. Status: ${reconnectResult.status}`);
+                return;
+            }
+
+            console.log("Reconnected successfully... \n");
+
+            // Check again if the device is in boot mode
+            checkIfHandleIsThere(mac, async (isInBootNow) => {
+                if (!isInBootNow) {
+                    console.log("Device is not in boot mode after reconnecting.\n");
+                    return;
+                }
+
+                console.log("Device is now in boot mode... \n");
+
+                const notificationOpen = await openNotification(mac);
+                if (!notificationOpen) {
+                    console.error("Failed to open notifications.\n");
+                    return;
+                }
+
+                console.log("Notifications opened...\n");
+                startDFU(mac);
+            });
+
+            return;
+        }
+
+        console.log(`Jump to boot attempt ${attempt} failed. Retrying in 5 seconds...`);
+        await delay(5000);
+    }
+
+    console.error("Failed to jump to boot mode after multiple attempts.");
+}
+
+async function handleAlreadyInBoot(mac) {
+
+    const notificationOpen = await openNotification(mac);
+    if (!notificationOpen) {
+        console.error("Failed to open notifications.\n");
+        return;
+    }
+    console.log("Notifications opened...\n");
+    startDFU(mac);
+
+}
+
+const startDFU = (mac) => {
+
+    const otaHandler = new CypressOTAHandler(mac, sendDataChunk, (cb) => responseEvent.on('response', data => cb(data)), PAYLOAD_PATH, "49A134B6C779", 256);
 
     console.log("Starting OTA")
 
     otaHandler.startOTA();
+
+    otaHandler.onWrite(data => {
+        console.log(data, "From onWrite")
+    })
+
+
+    otaHandler.onResponse(data => {
+        console.log(data, "From Response")
+    })
+
+    otaHandler.onProgress(data => {
+        console.log(data)
+    })
+
+    console.log("Starting dfu")
+}
+
+const makeReadyForProgramming = async (mac, actor = false,) => {
+
+    if (!actor) {
+        makeSensorReadyForProgramming(mac)
+    }
+
+    if (actor) {
+        makeActorReadyForProgramming() && startDFUProcess(mac)
+    }
+
+
+}
+
+async function startDFUProcess(mac, actor = false) {
+
+
+    makeReadyForProgramming(mac, actor)
+
+
+    await delay();
+
+    // const otaHandler = new CypressOTAHandler(mac, sendDataChunk, (cb) => responseEvent.on('response', data => cb(data)), PAYLOAD_PATH, "49A134B6C779", 130);
+
+    // const otaHandler = new CypressOTAHandler(mac, sendDataChunk, (cb) => responseEvent.on('response', data => cb(data)), PAYLOAD_PATH, "49A134B6C779", 256);
+
+    // console.log("Starting OTA")
+
+    // otaHandler.startOTA();
 
     // otaHandler.onWrite(data => {
     //     console.log(data, "From onWrite")
@@ -194,15 +418,15 @@ async function startDFUProcess(mac) {
     //     console.log(data, "From Response")
     // })
 
-    otaHandler.onProgress(data => {
-        console.log(data)
-    })
+    // otaHandler.onProgress(data => {
+    //     console.log(data)
+    // })
 }
 
-async function sendDataChunk(chunk, nodeMac) {
+async function sendDataChunk(chunk, mac) {
 
     try {
-        const url = `http://192.168.40.1/gatt/nodes/${nodeMac}/handle/19/value/${chunk}?noresponse=1`;
+        const url = `http://192.168.40.1/gatt/nodes/${mac}/handle/19/value/${chunk}?noresponse=1`;
         const response = await fetch(url, {
             method: 'GET',
             headers: {

@@ -95,16 +95,15 @@ export default class DFUController {
 
 
 
-    async startDFU() {
+    async startDFU(pureVersion = true) {
 
         console.log("## STARTING DFU ##");
 
-        this.rows = await this.processor.splitFirmwareIntoLines();
+        this.rows = pureVersion ? await this.processor.createPureLinesFromCyacd() : await this.processor.splitFirmwareIntoLines();
 
         this.amountOfRows = this.rows.length;
 
         let packet = this.getPacketToSend();
-
 
         this.#writeMethod(packet, this.bleDevice)
 

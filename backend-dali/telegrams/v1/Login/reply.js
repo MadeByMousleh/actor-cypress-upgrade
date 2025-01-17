@@ -19,7 +19,7 @@ export default class LoginTelegramReply {
     telegramType = {
         fieldSize: 2,
         description: "Telegram type",
-        value: null,
+        value: '1100',
     };
 
     totalLength = {
@@ -72,7 +72,7 @@ export default class LoginTelegramReply {
         let result = value.substring(14, 16);
 
         if (telegramType === "1100") {
-                return (result === this.result.ACK) || (result === this.result.LOGIN_ACK_OPEN_PERIOD);
+            return (result === this.result.ACK) || (result === this.result.LOGIN_ACK_OPEN_PERIOD);
         }
 
         return false;

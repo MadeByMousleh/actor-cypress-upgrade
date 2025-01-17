@@ -6,6 +6,7 @@ import VerifyChecksumPacket from '../telegrams/v1/cypressPackets/VerifyChecksum/
 
 import VerifyRowPacket from '../telegrams/v1/cypressPackets/VerifyRow/index.js'
 import WriteRowDataPacket from '../telegrams/v1/cypressPackets/WriteDataRowPacket/index.js'
+import BootLoaderPacketGen from './BootloaderPacketGen.js';
 import FlashRow from './FlashRow.js'
 
 import { readFile } from 'fs/promises';  // Async version of fs module
@@ -20,6 +21,7 @@ class PayloadProcessor {
     #payload = null;
     #file = null;
     chunkLength;
+    bootloaderPacketGen = new BootLoaderPacketGen();
 
 
     constructor(payload, securityKey, chunkLength) {
@@ -108,6 +110,48 @@ class PayloadProcessor {
         return packetsArray;
     }
 
+
+    async createPureLinesFromCyacd() {
+
+
+        this.#file = await readFile(this.#payload, 'utf8')
+        this.#file = this.#file.trim();
+
+        let packetsArray = [
+            this.securityKey ? this.bootloaderPacketGen.enterBootLoader(this.securityKey) : this.bootloaderPacketGen.enterBootLoader(),
+            this.bootloaderPacketGen.getFlashSize()];
+        let lines = this.#file.split(/\r?\n/);
+
+        for (var i = 1; i < lines.length; i++) {
+
+            const chunk = lines[i].substring(11, lines[i].length - 2).toUpperCase();
+
+            const chunks = chunk.match(new RegExp(`.{1,${this.chunkLength}}`, 'g'));
+
+            chunks.forEach((dataChunk, index) => {
+
+                if (dataChunk.length === this.chunkLength) {
+                    packetsArray.push(new SendDataPacket(dataChunk).create());
+
+                }
+                else {
+
+                    const arrayId = lines[i].substring(1, 3).toUpperCase();
+                    const rowNumber = lines[i].substring(3, 7).toUpperCase();
+
+                    packetsArray.push(new WriteRowDataPacket(dataChunk, rowNumber, arrayId).create());
+                    packetsArray.push(new VerifyRowPacket(rowNumber, arrayId).create());
+                }
+
+            })
+
+        }
+
+        packetsArray.push(new VerifyChecksumPacket().create())
+        packetsArray.push(new ExitBootLoaderPacket().create())
+
+        return packetsArray;
+    }
 
     getFlashDataLines = () => {
         if (!this.#flashDataLines) return this.#readDataLines();
